@@ -28,7 +28,7 @@ import type {
   SessionStats,
   UiCommand,
 } from '../core/contracts';
-import { attachInput, type DisplayRect } from '../input/mouse-keyboard';
+import { attachInput, mapKeyboardTarget, type DisplayRect, type KeyTarget } from '../input/mouse-keyboard';
 import { readLocalClipboardText } from '../input/clipboard-cursor';
 import {
   BackNotification_BlockInputState,
@@ -269,6 +269,8 @@ export class RdApp {
   private voiceCallSupported: boolean | undefined;
   private peerWho = ''; // user@host once peerInfo arrives
   private peerPlatform = '';
+  private peerVersion = '';
+  private keyboardMode: SessionPrefs['keyboardMode'] = 'map';
   private pop: HTMLElement | undefined; // the one open popover
   private popAnchor: HTMLElement | undefined;
   private popCleanup: (() => void) | undefined;
@@ -1212,6 +1214,11 @@ export class RdApp {
             (canCamera ? this.menuItem(null, 'View camera', false, 'camera') : '')
           : '';
       const canRemoteCursor = canUseRemoteCursor(this.peerPlatform, this.displays[this.current]);
+      const keyboardHtml = mapKeyboardTarget(this.peerPlatform, this.peerVersion)
+        ? '<div class="rd-pop-sep"></div><div class="rd-pop-title">Keyboard</div>' +
+          this.menuItem(null, 'Same layout as remote (map keys)', this.keyboardMode === 'map', 'keyboard:map') +
+          this.menuItem(null, 'Translate characters', this.keyboardMode === 'legacy', 'keyboard:legacy')
+        : '';
       const codecHtml = this.codecSupport.map((codec) =>
         this.menuItem(null, codec === 'auto' ? 'Automatic codec' : codec.toUpperCase(), this.preferredCodec === codec, `codec:${codec}`),
       ).join('');
@@ -1255,6 +1262,7 @@ export class RdApp {
             (this.displays.length > 1 ? this.menuItem(null, 'Follow remote window focus', this.followRemoteWindow, 'followRemoteWindow') : '') +
             this.menuItem(null, 'Enlarge remote cursor', this.cursorScale > 1, 'cursorScale')
           : '') +
+        keyboardHtml +
         securityHtml +
         tools +
         mediaHtml +
@@ -1343,6 +1351,13 @@ export class RdApp {
       };
       for (const action of ['showRemoteCursor', 'followRemoteCursor', 'followRemoteWindow'] as const) {
         pop.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)?.addEventListener('click', () => toggleDisplayOption(action));
+      }
+      for (const mode of ['map', 'legacy'] as const) {
+        pop.querySelector<HTMLButtonElement>(`[data-action="keyboard:${mode}"]`)?.addEventListener('click', () => {
+          this.keyboardMode = mode;
+          this.rememberPrefs({ keyboardMode: mode });
+          this.closePop();
+        });
       }
       pop.querySelector<HTMLButtonElement>('[data-action="cursorScale"]')?.addEventListener('click', () => {
         this.cursorScale = this.cursorScale > 1 ? 1 : 2;
@@ -1514,6 +1529,7 @@ export class RdApp {
     this.remoteAudioEnabled = p.remoteAudio;
     this.audioMuted = p.audioMuted;
     this.audioVolume = p.audioVolume;
+    this.keyboardMode = p.keyboardMode;
     this.audioPlayback?.setVolume(this.audioVolume);
     this.audioPlayback?.setMuted(this.audioMuted);
   }
@@ -1546,7 +1562,13 @@ export class RdApp {
       remoteAudio: this.remoteAudioEnabled,
       audioMuted: this.audioMuted,
       audioVolume: this.audioVolume,
+      keyboardMode: this.keyboardMode,
     };
+  }
+
+  /** Keycodes for Map mode, or null for legacy character input. */
+  private keyboardTarget(): KeyTarget | null {
+    return this.keyboardMode === 'map' ? mapKeyboardTarget(this.peerPlatform, this.peerVersion) : null;
   }
 
   private syncFullscreenButton(): void {
@@ -1882,6 +1904,7 @@ export class RdApp {
     this.clearSecurityState();
     this.peerWho = '';
     this.peerPlatform = '';
+    this.peerVersion = '';
     this.terminalSupported = false;
     this.cameraSupported = false;
     this.platformAdditions = '';
@@ -1913,6 +1936,7 @@ export class RdApp {
     worker.postMessage(cmd, [offscreen]);
     this.detach = attachInput(canvas, (c) => this.post(c), () => this.currentRect(), {
       isTouchMode: () => this.inputMode === 'touch',
+      keyboardTarget: () => this.keyboardTarget(),
     });
     this.el.peerLabel.textContent = this.peerId;
     this.el.statDevice.textContent = this.peerId;
@@ -2055,6 +2079,7 @@ export class RdApp {
         if (ev.current !== undefined) this.current = ev.current;
         this.peerWho = ev.username ? `${ev.username}@${ev.hostname}` : ev.hostname;
         this.peerPlatform = ev.platform || '';
+        this.peerVersion = ev.version || '';
         this.privacyModeSupported = ev.privacyModeSupported;
         this.privacyModeImpls = ev.privacyModeImpls;
         this.terminalSupported = ev.terminalSupported;
@@ -2544,6 +2569,7 @@ export class RdApp {
       this.detach?.();
       this.detach = attachInput(this.videoEl, (c) => this.post(c), () => this.currentRect(), {
         isTouchMode: () => this.inputMode === 'touch',
+        keyboardTarget: () => this.keyboardTarget(),
       });
       this.el.viewport.dataset.mse = '1';
     }

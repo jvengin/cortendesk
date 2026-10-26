@@ -61,7 +61,7 @@ export interface SessionLike {
   sendKey(
     down: boolean,
     press: boolean,
-    keyKind: 'chr' | 'control' | 'unicode',
+    keyKind: 'chr' | 'control' | 'unicode' | 'map',
     value: number,
     modifiers: number[],
   ): void;

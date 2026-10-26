@@ -634,12 +634,13 @@ export class Session {
   sendKey(
     down: boolean,
     press: boolean,
-    keyKind: 'chr' | 'control' | 'unicode',
+    keyKind: 'chr' | 'control' | 'unicode' | 'map',
     value: number,
     modifiers: number[],
   ): void {
+    // Map mode carries the host-platform keycode in `chr`.
     const union: KeyEvent['union'] =
-      keyKind === 'chr'
+      keyKind === 'chr' || keyKind === 'map'
         ? { $case: 'chr', chr: value }
         : keyKind === 'unicode'
           ? { $case: 'unicode', unicode: value }
@@ -651,7 +652,7 @@ export class Session {
         press,
         union,
         modifiers: modifiers as ControlKey[],
-        mode: KeyboardMode.Legacy,
+        mode: keyKind === 'map' ? KeyboardMode.Map : KeyboardMode.Legacy,
       }),
     });
   }

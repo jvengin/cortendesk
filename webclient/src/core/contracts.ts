@@ -63,7 +63,7 @@ export type SessionEvent =                       // worker -> main
 export type UiCommand =                           // main -> worker
   | { c:'connect'; config:SessionConfig; canvas:OffscreenCanvas }
   | { c:'mouse'; mask:number; x:number; y:number; modifiers:number[] }
-  | { c:'key'; down:boolean; press:boolean; keyKind:'chr'|'control'|'unicode'; value:number; modifiers:number[] }
+  | { c:'key'; down:boolean; press:boolean; keyKind:'chr'|'control'|'unicode'|'map'; value:number; modifiers:number[] }
   | { c:'switchDisplay'; index:number } | { c:'ctrlAltDel' } | { c:'refresh' }
   | { c:'quality'; imageQuality:number } | { c:'clipboardText'; text:string } | { c:'disconnect' }
   | { c:'restartRemoteDevice' } | { c:'requestElevation' }

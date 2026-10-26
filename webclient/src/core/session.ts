@@ -115,9 +115,31 @@ function isManualAccept(error: string): boolean {
   return e.includes('wait') && e.includes('accept');
 }
 
+/**
+ * A host sends a PeerInfo carrying only the display list whenever its displays
+ * change (display_service.rs) — on Wayland that happens right after login.
+ * Fill in who the peer is and what it supports from the login PeerInfo, or the
+ * UI loses its platform and version (and with them Map keyboard mode) and its
+ * privacy/terminal/camera features.
+ */
+export function withLoginPeerInfo(pi: PeerInfo, login: PeerInfo | undefined): PeerInfo {
+  if (pi.platform || !login) return pi;
+  return {
+    ...pi,
+    username: login.username,
+    hostname: login.hostname,
+    platform: login.platform,
+    version: login.version,
+    features: pi.features ?? login.features,
+    platform_additions: pi.platform_additions || login.platform_additions,
+  };
+}
+
 export class Session {
   /** Display index we asked for and have not had confirmed yet; null when settled. */
   private pendingDisplay: number | null = null;
+  /** The last PeerInfo that said who the peer is (the login one). */
+  private loginPeerInfo: PeerInfo | undefined;
 
   private readonly config: SessionConfig;
   private readonly sinks: SessionSinks;
@@ -574,7 +596,9 @@ export class Session {
     this.sinks.onClipboard?.(cb); // zstd / non-text: worker's job
   }
 
-  private emitPeerInfo(pi: PeerInfo): void {
+  private emitPeerInfo(update: PeerInfo): void {
+    const pi = withLoginPeerInfo(update, this.loginPeerInfo);
+    if (update.platform) this.loginPeerInfo = update;
     const advanced = parseAdvancedPeerCapabilities(pi.platform_additions);
     const resolutions = (pi.resolutions?.resolutions ?? []).map((r) => ({ width: r.width, height: r.height }));
     const displays: DisplayInfo[] = pi.displays.map((d, index) => ({

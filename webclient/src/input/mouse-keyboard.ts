@@ -175,6 +175,71 @@ function modifierList(e: ModifierState): number[] {
   return m;
 }
 
+export type LegacyKeyMessage = {
+  down: boolean;
+  keyKind: 'chr' | 'control' | 'unicode';
+  value: number;
+  modifiers: number[];
+};
+
+const LOCATION_LEFT = 1; // KeyboardEvent.DOM_KEY_LOCATION_LEFT
+// Windows emits the synthetic Control and the AltGraph key-down for one
+// physical AltGr press back to back, with the same OS event time.
+const ALTGR_FAKE_CTRL_MS = 50;
+
+type KeyEventLike = ModifierState &
+  Pick<KeyboardEvent, 'key' | 'location' | 'repeat' | 'timeStamp'>;
+
+/**
+ * Turns browser key events into the legacy KeyEvents the host expects.
+ *
+ * The host types a `unicode` key on every event it receives, ignoring down/up
+ * (input_service.rs process_unicode), so æøå are sent on key-down only —
+ * otherwise each is typed again on release.
+ *
+ * AltGr: Windows browsers report it as a synthetic left Control followed by
+ * AltGraph, and keep ctrlKey/altKey set for every key pressed under it. The
+ * host then sees `|` as the hotkey Ctrl+Alt+| instead of text. Like the native
+ * client (keyboard.rs legacy_keyboard_mode), drop the fake Control and send
+ * characters typed under AltGr without Ctrl/Alt.
+ */
+export class LegacyKeyTranslator {
+  private altGrHeld = false;
+  private ctrlDownAt: number | null = null;
+
+  translate(e: KeyEventLike, down: boolean): LegacyKeyMessage[] {
+    const k = legacyKeyCommand(e as KeyboardEvent, down);
+    if (!k) return [];
+    const out: LegacyKeyMessage[] = [];
+    const isAltGraph = e.key === 'AltGraph';
+    const fakeCtrlAt = this.ctrlDownAt;
+    this.ctrlDownAt = down && !e.repeat && e.key === 'Control' && e.location === LOCATION_LEFT
+      ? e.timeStamp
+      : null;
+
+    if (isAltGraph) {
+      if (down && !e.repeat && fakeCtrlAt !== null && e.timeStamp - fakeCtrlAt < ALTGR_FAKE_CTRL_MS) {
+        out.push({ down: false, keyKind: 'control', value: ControlKey.Control, modifiers: [] });
+      }
+      this.altGrHeld = down;
+    }
+    if (k.keyKind === 'unicode' && !down) return out;
+
+    let modifiers = modifierList(e);
+    if (this.altGrHeld && (isAltGraph || k.keyKind !== 'control')) {
+      modifiers = modifiers.filter((m) => m !== ControlKey.Control && m !== ControlKey.Alt);
+    }
+    out.push({ down, keyKind: k.keyKind, value: k.value, modifiers });
+    return out;
+  }
+
+  /** Focus left the canvas: the matching key-ups will never arrive. */
+  reset(): void {
+    this.altGrHeld = false;
+    this.ctrlDownAt = null;
+  }
+}
+
 type KeyboardLock = { lock?: (keyCodes?: string[]) => Promise<void>; unlock?: () => void };
 
 export type InputOptions = {
@@ -296,14 +361,17 @@ export function attachInput(
     e.preventDefault();
   };
 
+  const keys = new LegacyKeyTranslator();
   const onKey = (down: boolean) => (e: KeyboardEvent): void => {
-    const k = legacyKeyCommand(e, down);
-    if (!k) return;
+    if (!legacyKeyCommand(e, down)) return;
     e.preventDefault(); // keeps Ctrl+W / F5 / Tab from hitting the browser while focused
-    post({ c: 'key', down, press: false, keyKind: k.keyKind, value: k.value, modifiers: modifierList(e) });
+    for (const k of keys.translate(e, down)) {
+      post({ c: 'key', down: k.down, press: false, keyKind: k.keyKind, value: k.value, modifiers: k.modifiers });
+    }
   };
   const onKeyDown = onKey(true);
   const onKeyUp = onKey(false);
+  const onBlur = (): void => keys.reset();
 
   const kb: KeyboardLock | undefined =
     typeof navigator !== 'undefined' && 'keyboard' in navigator
@@ -326,6 +394,7 @@ export function attachInput(
   el.addEventListener('contextmenu', onContextMenu);
   el.addEventListener('keydown', onKeyDown);
   el.addEventListener('keyup', onKeyUp);
+  el.addEventListener('blur', onBlur);
   document.addEventListener('fullscreenchange', onFullscreenChange);
 
   return () => {
@@ -336,6 +405,7 @@ export function attachInput(
     el.removeEventListener('contextmenu', onContextMenu);
     el.removeEventListener('keydown', onKeyDown);
     el.removeEventListener('keyup', onKeyUp);
+    el.removeEventListener('blur', onBlur);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     kb?.unlock?.();
   };

@@ -316,9 +316,9 @@ export class MapKeyTranslator {
     }
 
     if (down) {
-      // Windows doesn't auto-repeat injected keys, so pass the browser's
-      // repeats on. Linux repeats a held key itself.
-      if (e.repeat && this.target === 'linux' && this.held.has(e.code)) return true;
+      // Pass the browser's repeats on: neither host auto-repeats our keys.
+      // Windows doesn't repeat injected keys, and a Linux host turns every
+      // non-modifier key-down into a click (connection.rs, rustdesk#6793).
       this.send(e.code, keyCode, true, modifiers);
     } else if (this.held.has(e.code)) {
       this.send(e.code, keyCode, false, modifiers);
